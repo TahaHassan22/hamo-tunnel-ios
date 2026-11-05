@@ -1,0 +1,562 @@
+# Hamo Tunnel iOS Build Workflow
+# Fully automated: creates Extension target, downloads libxray + hev-socks5-tunnel, 
+# builds unsigned .ipa for TrollStore (no Apple Developer account needed)
+# Runs on macOS GitHub Actions runner
+
+name: Build iOS (Unsigned for TrollStore)
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+      flutter_version:
+        description: 'Flutter version'
+        required: false
+        default: '3.24.3'
+        type: string
+
+env:
+  FLUTTER_VERSION: ${{ github.event.inputs.flutter_version || '3.24.3' }}
+  BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+  PROJECT_NAME: 'hamo_tunnel'
+  BUNDLE_ID: 'com.hamo.hamo_tunnel'
+  EXTENSION_BUNDLE_ID: 'com.hamo.hamo_tunnel.HamoTunnelExtension'
+  APP_GROUP: 'group.com.hamo.hamo_tunnel.shared'
+  LIBXRAY_VERSION: 'v26.10.31'
+  LIBXRAY_URL: 'https://github.com/XTLS/Xray-core/releases/download/v26.10.31/libxray-apple-cgo.zip'
+  HEV_SOCKS5_TUNNEL_VERSION: 'main'
+  HEV_SOCKS5_TUNNEL_URL: 'https://github.com/heiher/hev-socks5-tunnel/archive/refs/heads/main.zip'
+  OUTPUT_DIR: 'build/ios/ipa'
+
+jobs:
+  setup:
+    name: Setup & Validate
+    runs-on: macos-14
+    timeout-minutes: 15
+    outputs:
+      flutter_version: ${{ steps.flutter.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      - name: Verify Flutter installation
+        id: flutter
+        run: |
+          flutter --version
+          echo "version=$(flutter --version | head -1 | cut -d' ' -f2)" >> $GITHUB_OUTPUT
+
+      - name: Disable Flutter analytics
+        run: flutter config --no-analytics
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Generate code (build_runner)
+        run: |
+          dart run build_runner build --delete-conflicting-outputs || true
+
+      - name: Verify iOS project structure
+        run: |
+          ls -la ios/
+          ls -la ios/Runner.xcodeproj/
+          test -f ios/Runner/Info.plist && echo "Info.plist exists" || echo "ERROR: Info.plist missing"
+
+  download_dependencies:
+    name: Download Native Dependencies
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - name: Create Frameworks directory
+        run: mkdir -p ios/Frameworks
+
+      - name: Download libxray-apple-cgo
+        run: |
+          cd ios/Frameworks
+          echo "Downloading libxray-apple-cgo ${{ env.LIBXRAY_VERSION }}..."
+          curl -L -o libxray-apple-cgo.zip "${{ env.LIBXRAY_URL }}"
+          unzip -q libxray-apple-cgo.zip
+          ls -la libxray-apple-cgo.xcframework
+          echo "libxray downloaded and extracted"
+
+      - name: Download hev-socks5-tunnel (TUN2SOCKS bridge)
+        run: |
+          cd ios/Frameworks
+          echo "Downloading hev-socks5-tunnel..."
+          curl -L -o hev-socks5-tunnel.zip "${{ env.HEV_SOCKS5_TUNNEL_URL }}"
+          unzip -q hev-socks5-tunnel.zip
+          # Build the static library
+          cd hev-socks5-tunnel-main
+          make -j$(sysctl -n hw.ncpu) 2>&1 | tail -20
+          # Copy built library
+          cp build/libhev-socks5-tunnel.a ../libhev-socks5-tunnel.a
+          cp include/hev-socks5-tunnel.h ../hev-socks5-tunnel.h
+          ls -la ../libhev-socks5-tunnel.a ../hev-socks5-tunnel.h
+
+      - name: Verify dependencies
+        run: |
+          cd ios/Frameworks
+          echo "=== libxray ==="
+          file libxray-apple-cgo.xcframework/ios-arm64/libxray.a
+          echo "=== hev-socks5-tunnel ==="
+          file libhev-socks5-tunnel.a
+          echo "=== Headers ==="
+          ls -la hev-socks5-tunnel.h
+
+      - name: Upload dependencies artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-dependencies
+          path: |
+            ios/Frameworks/libxray-apple-cgo.xcframework
+            ios/Frameworks/libhev-socks5-tunnel.a
+            ios/Frameworks/hev-socks5-tunnel.h
+          retention-days: 7
+
+  setup_extension:
+    name: Setup Extension Target
+    needs: [setup, download_dependencies]
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download native dependencies
+        uses: actions/download-artifact@v4
+        with:
+          name: native-dependencies
+          path: ios/Frameworks
+
+      - name: Verify extension source files exist
+        run: |
+          ls -la ios/HamoTunnelExtension/
+          test -f ios/HamoTunnelExtension/PacketTunnelProvider.swift && echo "PacketTunnelProvider.swift OK"
+          test -f ios/HamoTunnelExtension/Tun2SocksBridge.h && echo "Tun2SocksBridge.h OK"
+          test -f ios/HamoTunnelExtension/Info.plist && echo "Info.plist OK"
+          test -f ios/HamoTunnelExtension/HamoTunnelExtension.entitlements && echo "Entitlements OK"
+
+      - name: Install xcodeproj gem
+        run: gem install xcodeproj --no-document
+
+      - name: Run automated extension target setup
+        run: |
+          chmod +x ios/setup_extension_target_ci.sh
+          ./ios/setup_extension_target_ci.sh
+
+      - name: Verify target was created
+        run: |
+          xcodebuild -project ios/Runner.xcodeproj -list | grep -A 20 "Targets:"
+          xcodebuild -project ios/Runner.xcodeproj -target HamoTunnelExtension -showBuildSettings | grep -E "(PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_ENTITLEMENTS|SWIFT_OBJC_BRIDGING_HEADER|FRAMEWORK_SEARCH_PATHS|OTHER_LDFLAGS)"
+
+  build_ios:
+    name: Build Unsigned iOS App + Extension
+    needs: [setup, setup_extension]
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download native dependencies
+        uses: actions/download-artifact@v4
+        with:
+          name: native-dependencies
+          path: ios/Frameworks
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ needs.setup.outputs.flutter_version }}
+          channel: 'stable'
+          cache: true
+
+      - name: Disable Flutter analytics
+        run: flutter config --no-analytics
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Generate code (build_runner)
+        run: |
+          dart run build_runner build --delete-conflicting-outputs || true
+
+      - name: Build Flutter iOS framework (Release, no codesign)
+        run: |
+          flutter build ios \
+            --${{ env.BUILD_TYPE }} \
+            --no-codesign \
+            --build-name=3.2.0 \
+            --build-number=32
+
+      - name: Build Extension target with xcodebuild (no codesign)
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            -quiet \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            OTHER_CODE_SIGN_FLAGS="--deep" \
+            2>&1 | tail -50
+
+      - name: Locate built .app and .appex
+        run: |
+          APP_PATH=$(find ios/build -name "Runner.app" -type d | head -1)
+          EXT_PATH=$(find ios/build -name "HamoTunnelExtension.appex" -type d | head -1)
+          
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: Runner.app not found"
+            find ios/build -name "*.app" -type d
+            exit 1
+          fi
+          
+          if [ -z "$EXT_PATH" ] || [ ! -d "$EXT_PATH" ]; then
+            echo "ERROR: HamoTunnelExtension.appex not found"
+            find ios/build -name "*.appex" -type d
+            exit 1
+          fi
+          
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+          echo "EXT_PATH=$EXT_PATH" >> $GITHUB_ENV
+          echo "Found app at: $APP_PATH"
+          echo "Found extension at: $EXT_PATH"
+
+      - name: Verify .app bundle structure
+        run: |
+          echo "=== App Bundle Structure ==="
+          ls -la "${{ env.APP_PATH }}/"
+          echo "=== Extension Bundle Structure ==="
+          ls -la "${{ env.EXT_PATH }}/"
+
+      - name: Verify no code signatures (unsigned build)
+        run: |
+          echo "Checking for code signatures..."
+          if [ -d "${{ env.APP_PATH }}/_CodeSignature" ]; then
+            echo "WARNING: App has _CodeSignature"
+          else
+            echo "OK: App has no _CodeSignature"
+          fi
+          
+          if [ -d "${{ env.EXT_PATH }}/_CodeSignature" ]; then
+            echo "WARNING: Extension has _CodeSignature"
+          else
+            echo "OK: Extension has no _CodeSignature"
+          fi
+
+      - name: Package unsigned .ipa
+        run: |
+          mkdir -p Payload
+          cp -R "${{ env.APP_PATH }}" Payload/
+          
+          # Ensure extension is inside app bundle
+          mkdir -p Payload/Runner.app/PlugIns
+          cp -R "${{ env.EXT_PATH }}" Payload/Runner.app/PlugIns/
+          
+          # Remove any code signatures
+          rm -rf Payload/Runner.app/_CodeSignature 2>/dev/null || true
+          rm -f Payload/Runner.app/embedded.mobileprovision 2>/dev/null || true
+          rm -rf Payload/Runner.app/PlugIns/HamoTunnelExtension.appex/_CodeSignature 2>/dev/null || true
+          rm -f Payload/Runner.app/PlugIns/HamoTunnelExtension.appex/embedded.mobileprovision 2>/dev/null || true
+          
+          # Create .ipa
+          cd Payload && zip -r -q ../${{ env.PROJECT_NAME }}_unsigned_${{ env.BUILD_TYPE }}_${{ github.run_number }}.ipa . && cd ..
+          
+          echo "IPA_PATH=${{ github.workspace }}/${{ env.PROJECT_NAME }}_unsigned_${{ env.BUILD_TYPE }}_${{ github.run_number }}.ipa" >> $GITHUB_ENV
+
+      - name: Verify unsigned .ipa
+        run: |
+          IPA="${{ env.IPA_PATH }}"
+          echo "Verifying IPA: $IPA"
+          unzip -l "$IPA" | grep -E "(Runner\.app|HamoTunnelExtension\.appex|Info\.plist)" | head -20
+          unzip -l "$IPA" | grep -i "codesign\|_CodeSignature\|mobileprovision" && echo "WARNING: Found signature artifacts" || echo "OK: No signature artifacts found"
+          unzip -p "$IPA" "Payload/Runner.app/Info.plist" | grep -A1 CFBundleIdentifier
+          unzip -p "$IPA" "Payload/Runner.app/PlugIns/HamoTunnelExtension.appex/Info.plist" | grep -A1 CFBundleIdentifier
+
+      - name: Upload unsigned .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-unsigned-ipa-${{ env.BUILD_TYPE }}
+          path: ${{ env.IPA_PATH }}
+          retention-days: 30
+
+  trollstore_sign:
+    name: TrollStore ldid Sign
+    needs: [build_ios]
+    runs-on: macos-14
+    timeout-minutes: 15
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download unsigned .ipa
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-unsigned-ipa-${{ env.BUILD_TYPE }}
+          path: artifacts/
+
+      - name: Install ldid
+        run: |
+          brew install ldid || true
+          ldid -v
+
+      - name: Extract .ipa for signing
+        run: |
+          cd artifacts
+          unzip -q *.ipa
+          ls -la Payload/Runner.app/
+          ls -la Payload/Runner.app/PlugIns/HamoTunnelExtension.appex/
+
+      - name: Create entitlements for main app
+        run: |
+          cat > entitlements_app.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.developer.networking.networkextension</key>
+    <array>
+        <string>packet-tunnel-provider</string>
+    </array>
+    <key>com.apple.developer.networking.vpn.api</key>
+    <array>
+        <string>allow-vpn</string>
+    </array>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>${{ env.BUNDLE_ID }}.shared</string>
+    </array>
+    <key>get-task-allow</key>
+    <true/>
+    <key>application-identifier</key>
+    <string>${{ env.BUNDLE_ID }}</string>
+</dict>
+</plist>
+EOF
+          cat entitlements_app.plist
+
+      - name: Create entitlements for extension
+        run: |
+          cat > entitlements_ext.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.developer.networking.networkextension</key>
+    <array>
+        <string>packet-tunnel-provider</string>
+    </array>
+    <key>com.apple.developer.networking.vpn.api</key>
+    <array>
+        <string>allow-vpn</string>
+    </array>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>${{ env.BUNDLE_ID }}.shared</string>
+    </array>
+    <key>get-task-allow</key>
+    <true/>
+    <key>application-identifier</key>
+    <string>${{ env.EXTENSION_BUNDLE_ID }}</string>
+</dict>
+</plist>
+EOF
+          cat entitlements_ext.plist
+
+      - name: Sign with ldid (TrollStore compatible)
+        run: |
+          cd artifacts
+          APP="Payload/Runner.app"
+          EXT="$APP/PlugIns/HamoTunnelExtension.appex"
+          
+          # Sign all frameworks and dylibs first
+          find "$APP" -name "*.dylib" -o -name "*.framework" | while read file; do
+            if [ -f "$file" ] || [ -d "$file" ]; then
+              echo "Signing $file"
+              ldid -S"$PWD/entitlements_app.plist" "$file" 2>/dev/null || true
+            fi
+          done
+          
+          # Sign extension
+          find "$EXT" -name "*.dylib" -o -name "*.framework" | while read file; do
+            if [ -f "$file" ] || [ -d "$file" ]; then
+              echo "Signing extension $file"
+              ldid -S"$PWD/entitlements_ext.plist" "$file" 2>/dev/null || true
+            fi
+          done
+          
+          # Sign extension executable
+          EXT_EXEC="$EXT/HamoTunnelExtension"
+          if [ -f "$EXT_EXEC" ]; then
+            echo "Signing extension executable: $EXT_EXEC"
+            ldid -S"$PWD/entitlements_ext.plist" "$EXT_EXEC"
+          fi
+          
+          # Sign main executable
+          MAIN_EXEC="$APP/Runner"
+          if [ -f "$MAIN_EXEC" ]; then
+            echo "Signing main executable: $MAIN_EXEC"
+            ldid -S"$PWD/entitlements_app.plist" "$MAIN_EXEC"
+          fi
+          
+          # Sign Flutter framework
+          find "$APP/Frameworks" -name "Flutter" -type f | while read file; do
+            echo "Signing Flutter: $file"
+            ldid -S"$PWD/entitlements_app.plist" "$file" 2>/dev/null || true
+          done
+          
+          # Sign App.framework
+          find "$APP/Frameworks" -name "App.framework" -type d | while read file; do
+            echo "Signing App.framework: $file"
+            ldid -S"$PWD/entitlements_app.plist" "$file" 2>/dev/null || true
+          done
+          
+          echo "ldid signing complete"
+
+      - name: Re-package signed .ipa
+        run: |
+          cd artifacts
+          zip -r -q ${{ env.PROJECT_NAME }}_trollstore_${{ github.ref_name }}.ipa Payload/
+          echo "Signed IPA created"
+
+      - name: Verify ldid signatures
+        run: |
+          cd artifacts
+          echo "=== Main app signature ==="
+          ldid -e Payload/Runner.app/Runner || echo "Could not verify main executable"
+          echo "=== Extension signature ==="
+          ldid -e Payload/Runner.app/PlugIns/HamoTunnelExtension.appex/HamoTunnelExtension || echo "Could not verify extension"
+          ls -la ${{ env.PROJECT_NAME }}_trollstore_${{ github.ref_name }}.ipa
+
+      - name: Upload TrollStore signed .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-trollstore-ipa-${{ github.ref_name }}
+          path: artifacts/${{ env.PROJECT_NAME }}_trollstore_${{ github.ref_name }}.ipa
+          retention-days: 90
+
+  release:
+    name: Create GitHub Release
+    needs: [build_ios, trollstore_sign]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download unsigned .ipa
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-unsigned-ipa-${{ env.BUILD_TYPE }}
+          path: release/unsigned
+
+      - name: Download TrollStore signed .ipa
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-trollstore-ipa-${{ github.ref_name }}
+          path: release/trollstore
+
+      - name: Prepare release notes
+        run: |
+          cat > release_notes.md << 'EOF'
+## Hamo Tunnel ${{ github.ref_name }}
+
+### Installation
+
+**For TrollStore (Recommended):**
+1. Download `hamo_tunnel_trollstore_${{ github.ref_name }}.ipa`
+2. Install via TrollStore app on iOS 15.0 - 15.8
+3. Trust the developer certificate in Settings → General → VPN & Device Management
+
+**For Unsigned (Advanced):**
+1. Download `hamo_tunnel_unsigned_release_${{ github.run_number }}.ipa`
+2. Sign with your own certificate using `ldid` or `codesign`
+3. Install via AltStore, Sideloadly, or similar
+
+### Features
+- V2Ray (VMess/VLESS) with WebSocket/gRPC via Xray core
+- OpenVPN (TCP/UDP) support
+- SSH tunneling with dynamic port forwarding
+- Custom DNS configuration
+- Server import/export via `hamotunnelplus://` scheme
+- Auto-update from remote config
+
+### VPN Architecture
+- **Flutter UI** → **MethodChannel** → **Swift VpnManager** → **Network Extension** → **Xray core + hev-socks5-tunnel**
+- iOS Packet Tunnel Provider creates TUN interface
+- Xray runs as local SOCKS proxy (127.0.0.1:10808)
+- hev-socks5-tunnel bridges TUN ↔ SOCKS
+
+### Build Info
+- Flutter: ${{ needs.setup.outputs.flutter_version }}
+- Build: ${{ github.run_number }}
+- Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+EOF
+          cat release_notes.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Hamo Tunnel ${{ github.ref_name }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            release/unsigned/*.ipa
+            release/trollstore/*.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    name: Notify Completion
+    needs: [build_ios, trollstore_sign, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    steps:
+      - name: Build Summary
+        run: |
+          echo "=== Build Summary ==="
+          echo "Flutter Version: ${{ needs.setup.outputs.flutter_version }}"
+          echo "Build Type: ${{ env.BUILD_TYPE }}"
+          echo "Build Number: ${{ github.run_number }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref }}"
+          echo ""
+          echo "Artifacts:"
+          echo "  - Unsigned .ipa: uploaded"
+          if [ "${{ needs.trollstore_sign.result }}" == "success" ]; then
+            echo "  - TrollStore signed .ipa: uploaded"
+            echo "  - GitHub Release: created"
+          else
+            echo "  - TrollStore signing: skipped/failed"
+          fi
