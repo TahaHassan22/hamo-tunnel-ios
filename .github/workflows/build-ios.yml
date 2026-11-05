@@ -338,56 +338,56 @@ jobs:
       - name: Create entitlements for main app
         run: |
           cat > entitlements_app.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>com.apple.developer.networking.networkextension</key>
-    <array>
-        <string>packet-tunnel-provider</string>
-    </array>
-    <key>com.apple.developer.networking.vpn.api</key>
-    <array>
-        <string>allow-vpn</string>
-    </array>
-    <key>keychain-access-groups</key>
-    <array>
-        <string>${{ env.BUNDLE_ID }}.shared</string>
-    </array>
-    <key>get-task-allow</key>
-    <true/>
-    <key>application-identifier</key>
-    <string>${{ env.BUNDLE_ID }}</string>
-</dict>
-</plist>
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+          <key>com.apple.developer.networking.networkextension</key>
+          <array>
+          <string>packet-tunnel-provider</string>
+          </array>
+          <key>com.apple.developer.networking.vpn.api</key>
+          <array>
+          <string>allow-vpn</string>
+          </array>
+          <key>keychain-access-groups</key>
+          <array>
+          <string>${{ env.BUNDLE_ID }}.shared</string>
+          </array>
+          <key>get-task-allow</key>
+          <true/>
+          <key>application-identifier</key>
+          <string>${{ env.BUNDLE_ID }}</string>
+          </dict>
+          </plist>
 EOF
           cat entitlements_app.plist
 
       - name: Create entitlements for extension
         run: |
           cat > entitlements_ext.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>com.apple.developer.networking.networkextension</key>
-    <array>
-        <string>packet-tunnel-provider</string>
-    </array>
-    <key>com.apple.developer.networking.vpn.api</key>
-    <array>
-        <string>allow-vpn</string>
-    </array>
-    <key>keychain-access-groups</key>
-    <array>
-        <string>${{ env.BUNDLE_ID }}.shared</string>
-    </array>
-    <key>get-task-allow</key>
-    <true/>
-    <key>application-identifier</key>
-    <string>${{ env.EXTENSION_BUNDLE_ID }}</string>
-</dict>
-</plist>
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+          <key>com.apple.developer.networking.networkextension</key>
+          <array>
+          <string>packet-tunnel-provider</string>
+          </array>
+          <key>com.apple.developer.networking.vpn.api</key>
+          <array>
+          <string>allow-vpn</string>
+          </array>
+          <key>keychain-access-groups</key>
+          <array>
+          <string>${{ env.BUNDLE_ID }}.shared</string>
+          </array>
+          <key>get-task-allow</key>
+          <true/>
+          <key>application-identifier</key>
+          <string>${{ env.EXTENSION_BUNDLE_ID }}</string>
+          </dict>
+          </plist>
 EOF
           cat entitlements_ext.plist
 
@@ -487,38 +487,32 @@ EOF
       - name: Prepare release notes
         run: |
           cat > release_notes.md << 'EOF'
-## Hamo Tunnel ${{ github.ref_name }}
-
-### Installation
-
-**For TrollStore (Recommended):**
-1. Download `hamo_tunnel_trollstore_${{ github.ref_name }}.ipa`
-2. Install via TrollStore app on iOS 15.0 - 15.8
-3. Trust the developer certificate in Settings → General → VPN & Device Management
-
-**For Unsigned (Advanced):**
-1. Download `hamo_tunnel_unsigned_release_${{ github.run_number }}.ipa`
-2. Sign with your own certificate using `ldid` or `codesign`
-3. Install via AltStore, Sideloadly, or similar
-
-### Features
-- V2Ray (VMess/VLESS) with WebSocket/gRPC via Xray core
-- OpenVPN (TCP/UDP) support
-- SSH tunneling with dynamic port forwarding
-- Custom DNS configuration
-- Server import/export via `hamotunnelplus://` scheme
-- Auto-update from remote config
-
-### VPN Architecture
-- **Flutter UI** → **MethodChannel** → **Swift VpnManager** → **Network Extension** → **Xray core + hev-socks5-tunnel**
-- iOS Packet Tunnel Provider creates TUN interface
-- Xray runs as local SOCKS proxy (127.0.0.1:10808)
-- hev-socks5-tunnel bridges TUN ↔ SOCKS
-
-### Build Info
-- Flutter: ${{ needs.setup.outputs.flutter_version }}
-- Build: ${{ github.run_number }}
-- Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          ## Hamo Tunnel ${{ github.ref_name }}
+                    ### Installation
+                    **For TrollStore (Recommended):**
+          1. Download `hamo_tunnel_trollstore_${{ github.ref_name }}.ipa`
+          2. Install via TrollStore app on iOS 15.0 - 15.8
+          3. Trust the developer certificate in Settings → General → VPN & Device Management
+                    **For Unsigned (Advanced):**
+          1. Download `hamo_tunnel_unsigned_release_${{ github.run_number }}.ipa`
+          2. Sign with your own certificate using `ldid` or `codesign`
+          3. Install via AltStore, Sideloadly, or similar
+                    ### Features
+          - V2Ray (VMess/VLESS) with WebSocket/gRPC via Xray core
+          - OpenVPN (TCP/UDP) support
+          - SSH tunneling with dynamic port forwarding
+          - Custom DNS configuration
+          - Server import/export via `hamotunnelplus://` scheme
+          - Auto-update from remote config
+                    ### VPN Architecture
+          - **Flutter UI** → **MethodChannel** → **Swift VpnManager** → **Network Extension** → **Xray core + hev-socks5-tunnel**
+          - iOS Packet Tunnel Provider creates TUN interface
+          - Xray runs as local SOCKS proxy (127.0.0.1:10808)
+          - hev-socks5-tunnel bridges TUN ↔ SOCKS
+                    ### Build Info
+          - Flutter: ${{ needs.setup.outputs.flutter_version }}
+          - Build: ${{ github.run_number }}
+          - Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 EOF
           cat release_notes.md
 
