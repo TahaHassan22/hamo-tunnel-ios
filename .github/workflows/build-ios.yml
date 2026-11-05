@@ -94,7 +94,7 @@ jobs:
         run: |
           cd ios/Frameworks
           echo "Downloading libxray-apple-cgo ${{ env.LIBXRAY_VERSION }}..."
-          curl -L -o libxray-apple-cgo.zip "${{ env.LIBXRAY_URL }}"
+          gh release download -R XTLS/libXray -p "libxray-apple-cgo.zip" --clobber
           unzip -q libxray-apple-cgo.zip
           ls -la libxray-apple-cgo.xcframework
           echo "libxray downloaded and extracted"
