@@ -105,12 +105,12 @@ jobs:
         run: |
           cd ios/Frameworks
           echo "Downloading hev-socks5-tunnel..."
-          curl -sL -o hev-socks5-tunnel.zip https://github.com/heiher/hev-socks5-tunnel/archive/refs/heads/main.zip
-          unzip -q hev-socks5-tunnel.zip
-          cd hev-socks5-tunnel-main
-          make -j$(sysctl -n hw.ncpu)
-          cp libhev-socks5-tunnel.a ../
+          git clone --recursive https://github.com/heiher/hev-socks5-tunnel.git
+          cd hev-socks5-tunnel
+          make static
+          cp lib/libhev-socks5-tunnel.a ../
           cp src/hev-socks5-tunnel.h ../
+          ls -la ../libhev-socks5-tunnel.a
 
       - name: Verify dependencies
 
