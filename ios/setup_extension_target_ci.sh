@@ -65,6 +65,13 @@ ext_target = project.new_target(:app_extension, 'HamoTunnelExtension', :ios, '15
 # Set build settings - NO CODE SIGNING
 ext_target.build_configurations.each do |config|
   config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.hamo.hamo_tunnel.HamoTunnelExtension'
+  # xcodeproj 1.28.1 does not set PRODUCT_NAME for :app_extension targets
+  # (Constants::COMMON_BUILD_SETTINGS defines it only for :framework) and the
+  # Flutter project does not define it at project level either, so without
+  # this PRODUCT_NAME resolves to "" and Xcode emits an empty ".appex".
+  config.build_settings['PRODUCT_NAME'] = '$(TARGET_NAME)'
+  config.build_settings['SKIP_INSTALL'] = 'YES'
+  config.build_settings['INFOPLIST_FILE'] ||= 'HamoTunnelExtension/Info.plist'
   config.build_settings['SWIFT_VERSION'] = '5.0'
   config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
   config.build_settings['CODE_SIGN_STYLE'] = 'Manual'
@@ -181,19 +188,36 @@ unless runner_target
         "Available targets: #{project.targets.map(&:name).join(', ')}"
 end
 
-# Build HamoTunnelExtension before Runner
-runner_target.add_dependency(ext_target)
+# Build HamoTunnelExtension before Runner (once only)
+unless runner_target.dependencies.any? { |dep| dep.target == ext_target }
+  runner_target.add_dependency(ext_target)
+end
 
-# Copy HamoTunnelExtension.appex into Runner.app/PlugIns/ (dst_subfolder_spec 13)
-embed_phase = project.new(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase)
-embed_phase.name = 'Embed App Extensions'
-embed_phase.dst_path = ''
-embed_phase.symbol_dst_subfolder_spec = :plug_ins
-runner_target.build_phases << embed_phase
+# Copy HamoTunnelExtension.appex into Runner.app/PlugIns/ (dst_subfolder_spec 13).
+# Reuse an existing phase so the product reference is never embedded twice.
+embed_phase = runner_target.copy_files_build_phases.find { |phase| phase.name == 'Embed App Extensions' }
+unless embed_phase
+  embed_phase = project.new(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase)
+  embed_phase.name = 'Embed App Extensions'
+  embed_phase.dst_path = ''
+  embed_phase.symbol_dst_subfolder_spec = :plug_ins
+  runner_target.build_phases << embed_phase
+end
 
-embed_build_file = embed_phase.add_file_reference(ext_target.product_reference)
-embed_build_file.settings = { 'ATTRIBUTES' => %w(CodeSignOnCopy RemoveHeadersOnCopy) }
+unless embed_phase.files.any? { |build_file| build_file.file_ref == ext_target.product_reference }
+  embed_build_file = embed_phase.add_file_reference(ext_target.product_reference)
+  embed_build_file.settings = { 'ATTRIBUTES' => %w(CodeSignOnCopy RemoveHeadersOnCopy) }
+end
 puts "Embedded HamoTunnelExtension.appex in Runner (target dependency + copy phase)"
+
+# No other target may share the extension's product reference.
+shared_product = project.targets.select do |target|
+  target != ext_target && target.product_reference == ext_target.product_reference
+end
+unless shared_product.empty?
+  raise "Product reference #{ext_target.product_reference.path} is shared with: " \
+        "#{shared_product.map(&:name).join(', ')}"
+end
 
 # Set the extension's principal class
 ext_target.build_configurations.each do |config|

@@ -176,6 +176,12 @@ jobs:
           xcodebuild -project ios/Runner.xcodeproj -list | grep -A 20 "Targets:"
           xcodebuild -project ios/Runner.xcodeproj -target HamoTunnelExtension -showBuildSettings | grep -E "(PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_ENTITLEMENTS|SWIFT_OBJC_BRIDGING_HEADER|FRAMEWORK_SEARCH_PATHS|OTHER_LDFLAGS)"
 
+      - name: Show extension product settings (diagnostic)
+        run: |
+          xcodebuild -project ios/Runner.xcodeproj -target HamoTunnelExtension -configuration Release -showBuildSettings | grep -E "^ *(PRODUCT_NAME|FULL_PRODUCT_NAME|WRAPPER_NAME|PRODUCT_BUNDLE_IDENTIFIER|TARGET_BUILD_DIR) ="
+          echo -n "Embed App Extensions phases: "
+          grep -c "Embed App Extensions" ios/Runner.xcodeproj/project.pbxproj || true
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
