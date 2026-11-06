@@ -85,8 +85,20 @@ ext_target.build_configurations.each do |config|
   config.build_settings['SWIFT_OBJC_BRIDGING_HEADER'] = 'HamoTunnelExtension/Tun2SocksBridge.h'
   config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
   config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'XRAY_STATIC_LIB'
+  # Linker flags required by the Go c-archive in LibXray.xcframework. Its
+  # undefined symbols include _res_9_ninit/_res_9_nsearch/_res_9_nclose
+  # (libresolv), _CF* (CoreFoundation) and _SecTrust*/_SecCertificate*
+  # (Security). They must be supplied by the target that links the archive.
   config.build_settings['OTHER_LDFLAGS'] ||= ['$(inherited)']
-  config.build_settings['OTHER_LDFLAGS'] << '-framework NetworkExtension'
+  link_flags = config.build_settings['OTHER_LDFLAGS']
+  [
+    '-framework NetworkExtension',
+    '-lresolv',
+    '-framework CoreFoundation',
+    '-framework Security'
+  ].each do |flag|
+    link_flags << flag unless link_flags.include?(flag)
+  end
   # PROJECT_DIR is the directory containing Runner.xcodeproj, i.e. ios/
   config.build_settings['FRAMEWORK_SEARCH_PATHS'] ||= ['$(inherited)']
   config.build_settings['FRAMEWORK_SEARCH_PATHS'] << '$(PROJECT_DIR)/Frameworks'
