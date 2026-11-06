@@ -38,11 +38,9 @@ extern char *CGoInvoke(char *requestJSON);
 extern void CGoFree(char *value);
 ```
 
-There is **no** `XrayStart`, `XrayStop`, `XrayWritePacket`, `XrayUpdateConfig`,
-`XrayGetStats`, `XraySetPacketCallback` or `XrayVersion` in this build.
-
-`HamoTunnelExtension-Bridging-Header.h` is kept only as a thin alias that includes
-`Tun2SocksBridge.h`; it is not part of the CI-built target.
+This build exports no start/stop, packet-write, config-update, stats or version
+C entry points. Every operation goes through `CGoInvoke` with the JSON methods
+listed below.
 
 ### 3. Invoke Protocol (libXray v26.10.31)
 

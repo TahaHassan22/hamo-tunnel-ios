@@ -47,12 +47,6 @@ ext_group.set_source_tree('SOURCE_ROOT')
   ext_target.add_file_references([file_ref])
 end
 
-# Add C files
-['XrayBridge.c'].each do |file|
-  file_ref = ext_group.new_file(File.join(ext_path, file))
-  ext_target.add_file_references([file_ref])
-end
-
 # Add bridging header
 bridging_header = ext_group.new_file(File.join(ext_path, 'Tun2SocksBridge.h'))
 ext_target.add_file_references([bridging_header])
