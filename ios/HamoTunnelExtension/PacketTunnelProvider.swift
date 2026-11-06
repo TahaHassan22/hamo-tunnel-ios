@@ -201,12 +201,17 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     return
                 }
 
-                self?.startVPNStack(with: config) { stackError in
+                guard let self = self else {
+                    completionHandler(NSError(domain: "HamoTunnelError", code: 5, userInfo: [NSLocalizedDescriptionKey: "Tunnel provider deallocated before startup"]))
+                    return
+                }
+
+                self.startVPNStack(with: config) { stackError in
                     if let stackError = stackError {
                         completionHandler(stackError)
                         return
                     }
-                    self?.isRunning = true
+                    self.isRunning = true
                     completionHandler(nil)
                 }
             }
@@ -276,7 +281,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         settings.ipv4Settings = ipv4Settings
 
         // IPv6
-        let ipv6Settings = NEIPv6Settings(addresses: ["fc00::10:10:10:1"], networkPrefixLengths: [126])
+        let ipv6Settings = NEIPv6Settings(addresses: ["fc00::10:10:10:1"], networkPrefixLengths: [NSNumber(value: 126)])
         ipv6Settings.includedRoutes = [NEIPv6Route.default()]
         settings.ipv6Settings = ipv6Settings
 
@@ -332,10 +337,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 return
             }
 
-            os_log("Xray started on 127.0.0.1:%{public}ld", log: logger, type: .info, self?.xraySocksPort ?? 10808)
+            guard let self = self else {
+                completion(NSError(domain: "HamoTunnelError", code: 6, userInfo: [NSLocalizedDescriptionKey: "Tunnel provider deallocated before hev-socks5-tunnel startup"]))
+                return
+            }
+
+            os_log("Xray started on 127.0.0.1:%{public}ld", log: logger, type: .info, self.xraySocksPort)
 
             // Step 3: Start hev-socks5-tunnel bridge (iOS TUN -> Xray SOCKS)
-            self?.startHevSocks5Tunnel { tunError in
+            self.startHevSocks5Tunnel { tunError in
                 if let tunError = tunError {
                     os_log("Failed to start hev-socks5-tunnel: %{public}@", log: logger, type: .error, tunError.localizedDescription)
                     completion(tunError)
@@ -373,13 +383,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             user["security"] = "auto"
         }
 
-        let outboundSettings: [String: Any] = [
-            "vnext": [[
-                "address": config.serverAddress,
-                "port": config.serverPort,
-                "users": [user]
-            ]]
+        // Every nested dictionary/array that mixes value types is explicitly
+        // typed. Swift only allows heterogeneous collection literals when the
+        // target type is spelled out; an outer [String: Any] does not provide
+        // that context for the nested literals.
+        let vnextEntry: [String: Any] = [
+            "address": config.serverAddress,
+            "port": config.serverPort,
+            "users": [user]
         ]
+        let outboundSettings: [String: Any] = ["vnext": [vnextEntry]]
 
         var streamSettings: [String: Any] = [
             "network": isGrpc ? "grpc" : "ws",
@@ -387,22 +400,26 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         ]
 
         if isGrpc {
-            streamSettings["grpcSettings"] = [
+            let grpcSettings: [String: Any] = [
                 "serviceName": path,
                 "mode": v2rayType == 1 ? "gun" : "multi"
             ]
+            streamSettings["grpcSettings"] = grpcSettings
         } else {
-            streamSettings["wsSettings"] = [
+            let wsHeaders: [String: String] = ["Host": host]
+            let wsSettings: [String: Any] = [
                 "path": path,
-                "headers": ["Host": host]
+                "headers": wsHeaders
             ]
+            streamSettings["wsSettings"] = wsSettings
         }
 
         if !allowInsecure {
-            streamSettings["tlsSettings"] = [
+            let tlsSettings: [String: Any] = [
                 "serverName": host,
                 "allowInsecure": allowInsecure
             ]
+            streamSettings["tlsSettings"] = tlsSettings
         }
 
         let outbound: [String: Any] = [
@@ -412,36 +429,55 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             "streamSettings": streamSettings
         ]
 
+        let logSettings: [String: Any] = ["loglevel": "warning"]
+        let inboundSettings: [String: Any] = [
+            "auth": "noauth",
+            "udp": true,
+            "userLevel": 8
+        ]
+        let sniffingSettings: [String: Any] = [
+            "enabled": true,
+            "destOverride": ["http", "tls"]
+        ]
+        let inbound: [String: Any] = [
+            "tag": "socks-in",
+            "port": xraySocksPort,
+            "listen": "127.0.0.1",
+            "protocol": "socks",
+            "settings": inboundSettings,
+            "sniffing": sniffingSettings
+        ]
+        let inbounds: [[String: Any]] = [inbound]
+
+        let directIPRule: [String: Any] = [
+            "type": "field",
+            "outboundTag": "direct",
+            "ip": PacketTunnelProvider.privateIPRules
+        ]
+        let directDomainRule: [String: Any] = [
+            "type": "field",
+            "outboundTag": "direct",
+            "domain": ["full:localhost", "domain:local"]
+        ]
+        let proxyPortRule: [String: Any] = [
+            "type": "field",
+            "outboundTag": "proxy",
+            "port": "0-65535"
+        ]
+        let routingRules: [[String: Any]] = [directIPRule, directDomainRule, proxyPortRule]
+        let routing: [String: Any] = [
+            "domainStrategy": "IPIfNonMatch",
+            "rules": routingRules
+        ]
+
+        let dnsServers = config.customDns?.components(separatedBy: ",") ?? ["1.1.1.1", "8.8.8.8"]
+        let dns: [String: Any] = ["servers": dnsServers]
+
         var configDict: [String: Any] = [
-            "log": ["loglevel": "warning"],
-            "inbounds": [
-                [
-                    "tag": "socks-in",
-                    "port": xraySocksPort,
-                    "listen": "127.0.0.1",
-                    "protocol": "socks",
-                    "settings": [
-                        "auth": "noauth",
-                        "udp": true,
-                        "userLevel": 8
-                    ],
-                    "sniffing": [
-                        "enabled": true,
-                        "destOverride": ["http", "tls"]
-                    ]
-                ]
-            ],
-            "routing": [
-                "domainStrategy": "IPIfNonMatch",
-                "rules": [
-                    ["type": "field", "outboundTag": "direct", "ip": PacketTunnelProvider.privateIPRules],
-                    ["type": "field", "outboundTag": "direct", "domain": ["full:localhost", "domain:local"]],
-                    ["type": "field", "outboundTag": "proxy", "port": "0-65535"]
-                ] as [[String: Any]]
-            ],
-            "dns": [
-                "servers": config.customDns?.components(separatedBy: ",") ?? ["1.1.1.1", "8.8.8.8"]
-            ]
+            "log": logSettings,
+            "inbounds": inbounds,
+            "routing": routing,
+            "dns": dns
         ]
         
         let outbounds: [[String: Any]] = [

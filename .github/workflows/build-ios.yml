@@ -212,7 +212,7 @@ jobs:
         if: failure() && steps.flutter_build.outcome == 'failure'
         continue-on-error: true
         run: |
-          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO -keepGoing build 2>&1 | grep -E "error:|warning: .*undefined|ld:" | sort -u
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build 2>&1 | grep -E "error:|warning: .*undefined|ld:" | sort -u
 
       - name: Build Extension target with xcodebuild (no codesign)
         run: |

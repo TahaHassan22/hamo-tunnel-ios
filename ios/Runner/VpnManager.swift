@@ -17,6 +17,14 @@ class VpnManager: NSObject {
     private let channelName = "com.hamo.hamo_tunnel/vpn"
     private var methodChannel: FlutterMethodChannel?
     private var tunnelProviderManager: NETunnelProviderManager?
+
+    // Flutter expects a map here; the values are mixed Int/Bool, so the type
+    // must be explicit or Swift rejects the heterogeneous literal.
+    private static let emptyStats: [String: Any] = [
+        "bytesSent": 0,
+        "bytesReceived": 0,
+        "isConnected": false
+    ]
     
     // VPN Status callbacks to Flutter
     private var flutterStatusCallback: ((String, String?) -> Void)?
@@ -33,8 +41,9 @@ class VpnManager: NSObject {
             self?.handleMethodCall(call, result: result)
         }
         
-        // Observe VPN status changes
-        NotificationCenter.default.addObserver(
+        // Observe VPN status changes. The observer token is intentionally not
+        // retained: selector-based observers are zeroing-weak since iOS 9.
+        _ = NotificationCenter.default.addObserver(
             self,
             selector: #selector(vpnStatusChanged(_:)),
             name: .NEVPNStatusDidChange,
@@ -160,13 +169,13 @@ class VpnManager: NSObject {
     private func getStats(result: @escaping FlutterResult) {
         // Send message to tunnel provider to get stats
         guard let session = tunnelProviderManager?.connection as? NETunnelProviderSession else {
-            result(["bytesSent": 0, "bytesReceived": 0, "isConnected": false])
+            result(VpnManager.emptyStats)
             return
         }
         
         let message = ["type": "getStats"]
         guard let data = try? JSONSerialization.data(withJSONObject: message) else {
-            result(["bytesSent": 0, "bytesReceived": 0, "isConnected": false])
+            result(VpnManager.emptyStats)
             return
         }
         do {
@@ -175,12 +184,12 @@ class VpnManager: NSObject {
                    let stats = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any] {
                     result(stats)
                 } else {
-                    result(["bytesSent": 0, "bytesReceived": 0, "isConnected": false])
+                    result(VpnManager.emptyStats)
                 }
             }
         } catch {
             os_log("Failed to send stats request: %{public}@", log: .default, type: .error, error.localizedDescription)
-            result(["bytesSent": 0, "bytesReceived": 0, "isConnected": false])
+            result(VpnManager.emptyStats)
         }
     }
     
@@ -190,7 +199,7 @@ class VpnManager: NSObject {
             return
         }
         
-        let message = ["type": "updateConfig", "config": config]
+        let message: [String: Any] = ["type": "updateConfig", "config": config]
         guard let data = try? JSONSerialization.data(withJSONObject: message) else {
             result(FlutterError(code: "ENCODE_FAILED", message: "Failed to encode config", details: nil))
             return
@@ -236,10 +245,11 @@ class VpnManager: NSObject {
         
         // Notify Flutter
         DispatchQueue.main.async { [weak self] in
-            self?.methodChannel?.invokeMethod("onVpnStatusChanged", arguments: [
-                "state": statusString,
-                "message": message
-            ])
+            var arguments: [String: Any] = ["state": statusString]
+            if let message = message {
+                arguments["message"] = message
+            }
+            self?.methodChannel?.invokeMethod("onVpnStatusChanged", arguments: arguments)
         }
         
         // Notify local callback
