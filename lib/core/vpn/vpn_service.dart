@@ -172,8 +172,25 @@ class VpnService extends ChangeNotifier {
       'routing': {
         'domainStrategy': 'IPIfNonMatch',
         'rules': [
-          {'type': 'field', 'outboundTag': 'direct', 'ip': ['geoip:private']},
-          {'type': 'field', 'outboundTag': 'direct', 'domain': ['geosite:private']},
+          {
+            'type': 'field',
+            'outboundTag': 'direct',
+            'ip': [
+              '10.0.0.0/8',
+              '172.16.0.0/12',
+              '192.168.0.0/16',
+              '127.0.0.0/8',
+              '169.254.0.0/16',
+              '100.64.0.0/10',
+              'fc00::/7',
+              'fe80::/10',
+            ],
+          },
+          {
+            'type': 'field',
+            'outboundTag': 'direct',
+            'domain': ['full:localhost', 'domain:local'],
+          },
           {'type': 'field', 'outboundTag': 'proxy', 'port': '0-65535'}
         ]
       },

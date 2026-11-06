@@ -32,7 +32,7 @@ ext_target.build_configurations.each do |config|
   config.build_settings['CODE_SIGN_IDENTITY'] = 'Apple Development'
   config.build_settings['SDKROOT'] = 'iphoneos'
   config.build_settings['ENABLE_BITCODE'] = 'NO'
-  config.build_settings['SWIFT_OBJC_BRIDGING_HEADER'] = 'HamoTunnelExtension/HamoTunnelExtension-Bridging-Header.h'
+  config.build_settings['SWIFT_OBJC_BRIDGING_HEADER'] = 'HamoTunnelExtension/Tun2SocksBridge.h'
   config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
   config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'XRAY_STATIC_LIB'
 end
@@ -54,7 +54,7 @@ end
 end
 
 # Add bridging header
-bridging_header = ext_group.new_file(File.join(ext_path, 'HamoTunnelExtension-Bridging-Header.h'))
+bridging_header = ext_group.new_file(File.join(ext_path, 'Tun2SocksBridge.h'))
 ext_target.add_file_references([bridging_header])
 
 # Add Info.plist
