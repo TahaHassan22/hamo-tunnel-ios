@@ -14,6 +14,10 @@
     <array>
         <string>$(AppIdentifierPrefix)com.hamo.hamo_tunnel.shared</string>
     </array>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.hamo.hamo_tunnel.shared</string>
+    </array>
     <key>get-task-allow</key>
     <true/>
 </dict>

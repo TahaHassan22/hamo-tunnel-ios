@@ -98,7 +98,7 @@ class VpnService extends ChangeNotifier {
     
     // Find server config from preferences or mock data
     final config = <String, dynamic>{
-      'protocol': protocol.name,
+      'protocol': protocol.wireName,
       'server': _prefs.serverIp.isNotEmpty ? _prefs.serverIp : serverName,
       'port': _getPortForProtocol(protocol),
       'username': _prefs.username.isNotEmpty ? _prefs.username : null,

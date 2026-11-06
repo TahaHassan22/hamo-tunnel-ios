@@ -9,6 +9,7 @@
 import Foundation
 import NetworkExtension
 import Flutter
+import os.log
 
 class VpnManager: NSObject {
     static let shared = VpnManager()
@@ -110,28 +111,49 @@ class VpnManager: NSObject {
         }
         
         // Save config to manager
-        manager.protocolConfiguration?.providerConfiguration = config
+        guard let providerProtocol = manager.protocolConfiguration as? NETunnelProviderProtocol else {
+            result(FlutterError(code: "NO_PROTOCOL", message: "VPN protocol is not NETunnelProviderProtocol", details: nil))
+            return
+        }
+        providerProtocol.providerConfiguration = config
         
         // Save and start
-        manager.saveToPreferences { [weak self] error in
+        manager.saveToPreferences { error in
             if let error = error {
                 os_log("Failed to save config: %{public}@", log: .default, type: .error, error.localizedDescription)
                 result(FlutterError(code: "SAVE_FAILED", message: error.localizedDescription, details: nil))
                 return
             }
-            
-            do {
-                try manager.connection.startVPNTunnel(options: ["vpnConfig": try JSONSerialization.data(withJSONObject: config)])
-                result(true)
-            } catch {
-                os_log("Failed to start VPN: %{public}@", log: .default, type: .error, error.localizedDescription)
-                result(FlutterError(code: "START_FAILED", message: error.localizedDescription, details: nil))
+
+            // NetworkExtension requires a reload after saving before the
+            // connection can be started, otherwise startTunnel() can fail
+            // with NEVPNErrorConfigurationInvalid.
+            manager.loadFromPreferences { error in
+                if let error = error {
+                    os_log("Failed to reload config: %{public}@", log: .default, type: .error, error.localizedDescription)
+                    result(FlutterError(code: "LOAD_FAILED", message: error.localizedDescription, details: nil))
+                    return
+                }
+
+                guard let session = manager.connection as? NETunnelProviderSession else {
+                    result(FlutterError(code: "NO_SESSION", message: "Connection is not a NETunnelProviderSession", details: nil))
+                    return
+                }
+
+                do {
+                    let options: [String: Any] = ["vpnConfig": try JSONSerialization.data(withJSONObject: config)]
+                    try session.startTunnel(options: options)
+                    result(true)
+                } catch {
+                    os_log("Failed to start VPN: %{public}@", log: .default, type: .error, error.localizedDescription)
+                    result(FlutterError(code: "START_FAILED", message: error.localizedDescription, details: nil))
+                }
             }
         }
     }
     
     private func stopVpn(result: @escaping FlutterResult) {
-        tunnelProviderManager?.connection.stopVPNTunnel()
+        (tunnelProviderManager?.connection as? NETunnelProviderSession)?.stopTunnel()
         result(true)
     }
     
@@ -143,8 +165,12 @@ class VpnManager: NSObject {
         }
         
         let message = ["type": "getStats"]
-        if let data = try? JSONSerialization.data(withJSONObject: message) {
-            session.sendProviderMessage(data) { responseData in
+        guard let data = try? JSONSerialization.data(withJSONObject: message) else {
+            result(["bytesSent": 0, "bytesReceived": 0, "isConnected": false])
+            return
+        }
+        do {
+            try session.sendProviderMessage(data) { responseData in
                 if let responseData = responseData,
                    let stats = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any] {
                     result(stats)
@@ -152,7 +178,8 @@ class VpnManager: NSObject {
                     result(["bytesSent": 0, "bytesReceived": 0, "isConnected": false])
                 }
             }
-        } else {
+        } catch {
+            os_log("Failed to send stats request: %{public}@", log: .default, type: .error, error.localizedDescription)
             result(["bytesSent": 0, "bytesReceived": 0, "isConnected": false])
         }
     }
@@ -164,12 +191,17 @@ class VpnManager: NSObject {
         }
         
         let message = ["type": "updateConfig", "config": config]
-        if let data = try? JSONSerialization.data(withJSONObject: message) {
-            session.sendProviderMessage(data) { _ in
+        guard let data = try? JSONSerialization.data(withJSONObject: message) else {
+            result(FlutterError(code: "ENCODE_FAILED", message: "Failed to encode config", details: nil))
+            return
+        }
+        do {
+            try session.sendProviderMessage(data) { _ in
                 result(true)
             }
-        } else {
-            result(FlutterError(code: "ENCODE_FAILED", message: "Failed to encode config", details: nil))
+        } catch {
+            os_log("Failed to send config update: %{public}@", log: .default, type: .error, error.localizedDescription)
+            result(FlutterError(code: "SEND_FAILED", message: error.localizedDescription, details: nil))
         }
     }
     

@@ -17,6 +17,22 @@ enum VpnProtocol {
 
   const VpnProtocol(this.value, this.displayName, this.shortName);
 
+  /// Protocol value expected by the iOS Network Extension (VPNConfiguration).
+  String get wireName {
+    switch (this) {
+      case VpnProtocol.openvpnTcp:
+        return 'openvpn_tcp';
+      case VpnProtocol.openvpnUdp:
+        return 'openvpn_udp';
+      case VpnProtocol.ssh:
+        return 'ssh';
+      case VpnProtocol.sshSpecial:
+        return 'ssh_special';
+      case VpnProtocol.v2ray:
+        return 'v2ray';
+    }
+  }
+
   static VpnProtocol fromValue(int value) {
     return VpnProtocol.values.firstWhere(
       (e) => e.value == value,

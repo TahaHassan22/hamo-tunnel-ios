@@ -51,9 +51,38 @@ ext_path = ENV.fetch('EXT_PATH') { raise "EXT_PATH env var not set" }
 puts "Opening project: #{project_path}"
 project = Xcodeproj::Project.open(project_path)
 
+# ---------------------------------------------------------------------------
+# Runner target: compile app-only Swift sources kept outside the generated
+# Flutter project (VpnManager.swift). This runs before the extension
+# early-exit below so it is always applied, and it is idempotent.
+# ---------------------------------------------------------------------------
+runner_target_for_sources = project.targets.find { |t| t.name == 'Runner' }
+raise "Runner target not found in #{project_path}" unless runner_target_for_sources
+
+vpn_manager_path = File.expand_path(File.join(File.dirname(project_path), 'Runner', 'VpnManager.swift'))
+if File.exist?(vpn_manager_path)
+  already_compiled = runner_target_for_sources.source_build_phase.files.any? do |build_file|
+    build_file.file_ref && File.basename(build_file.file_ref.path.to_s) == 'VpnManager.swift'
+  end
+  if already_compiled
+    puts "VpnManager.swift already in Runner Compile Sources"
+  else
+    runner_group = project.main_group.find_subpath('Runner', false)
+    raise "Runner group not found in #{project_path}" unless runner_group
+    file_ref = runner_group.files.find { |ref| File.basename(ref.path.to_s) == 'VpnManager.swift' }
+    file_ref ||= runner_group.new_file(vpn_manager_path)
+    runner_target_for_sources.add_file_references([file_ref])
+    puts "Added VpnManager.swift to Runner Compile Sources"
+  end
+else
+  puts "WARNING: VpnManager.swift not found at #{vpn_manager_path}"
+end
+
 # Check if target already exists
 if project.targets.find { |t| t.name == 'HamoTunnelExtension' }
   puts "HamoTunnelExtension target already exists"
+  # Persist any changes made above (e.g. Runner source membership) before exiting.
+  project.save
   exit 0
 end
 
@@ -95,7 +124,10 @@ ext_target.build_configurations.each do |config|
     '-framework NetworkExtension',
     '-lresolv',
     '-framework CoreFoundation',
-    '-framework Security'
+    '-framework Security',
+    # Go c-archives can exceed the 24-bit compact-unwind offset limit; this
+    # tells ld to emit DWARF unwind info for the extension binary instead.
+    '-Wl,-no_compact_unwind'
   ].each do |flag|
     link_flags << flag unless link_flags.include?(flag)
   end
