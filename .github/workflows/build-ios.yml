@@ -94,7 +94,7 @@ jobs:
         run: |
           cd ios/Frameworks
           echo "Downloading libxray-apple-cgo..."
-          gh release download -R XTLS/libXray -p "libxray-apple-cgo.zip" --clobber
+          curl -sL -o libxray-apple-cgo.zip https://github.com/XTLS/libXray/releases/download/v26.10.31/libxray-apple-cgo.zip
           unzip -q libxray-apple-cgo.zip
           rm libxray-apple-cgo.zip
           mv libxray-apple-cgo/LibXray.xcframework .
@@ -105,9 +105,8 @@ jobs:
         run: |
           cd ios/Frameworks
           echo "Downloading hev-socks5-tunnel..."
-          curl -L -o hev-socks5-tunnel.zip "${{ env.HEV_SOCKS5_TUNNEL_URL }}"
+          curl -sL -o hev-socks5-tunnel.zip https://github.com/heiher/hev-socks5-tunnel/archive/refs/heads/main.zip
           unzip -q hev-socks5-tunnel.zip
-          # Build the static library
           cd hev-socks5-tunnel-main
           make -j$(sysctl -n hw.ncpu)
           cp libhev-socks5-tunnel.a ../
