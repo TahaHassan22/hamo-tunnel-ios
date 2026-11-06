@@ -91,15 +91,16 @@ jobs:
         run: mkdir -p ios/Frameworks
 
       - name: Download libxray-apple-cgo
-        run: |
-          cd ios/Frameworks
-          echo "Downloading libxray-apple-cgo ${{ env.LIBXRAY_VERSION }}..."
-          gh release download -R XTLS/libXray -p "libxray-apple-cgo.zip" --clobber
-          unzip -q libxray-apple-cgo.zip
-          ls -la libxray-apple-cgo.xcframework
-          echo "libxray downloaded and extracted"
-
-      - name: Download hev-socks5-tunnel (TUN2SOCKS bridge)
+  run: |
+    cd ios/Frameworks
+    echo "Downloading libxray-apple-cgo..."
+    gh release download -R XTLS/libXray -p "libxray-apple-cgo.zip" --clobber
+    unzip -q libxray-apple-cgo.zip
+    rm libxray-apple-cgo.zip
+    mv libxray-apple-cgo/LibXray.xcframework .
+    rm -rf libxray-apple-cgo
+    ls -la LibXray.xcframework
+- name: Download hev-socks5-tunnel (TUN2SOCKS bridge)
         run: |
           cd ios/Frameworks
           echo "Downloading hev-socks5-tunnel..."
