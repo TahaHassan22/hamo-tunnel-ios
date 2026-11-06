@@ -73,6 +73,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     // MARK: - Properties
     private var isRunning = false
     private var currentConfig: VPNConfiguration?
+    private var hevSocks5TunnelThread: Thread?
     private let packetQueue = DispatchQueue(label: "com.hamo.hamo_tunnel.packetQueue", qos: .userInteractive)
     
     // Xray SOCKS proxy endpoint
@@ -376,66 +377,73 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
     
     // MARK: - hev-socks5-tunnel Bridge (TUN2SOCKS)
+    // Uses upstream API: hev_socks5_tunnel_main_from_str, hev_socks5_tunnel_quit, hev_socks5_tunnel_stats
     private func startHevSocks5Tunnel(completion: @escaping (Error?) -> Void) {
         os_log("Starting hev-socks5-tunnel bridge", log: logger, type: .info)
         
-        // hev-socks5-tunnel handles: iOS TUN packets -> Xray SOCKS (127.0.0.1:10808)
-        // It reads from packetFlow and forwards to Xray SOCKS
-        // We initialize it with the Xray SOCKS endpoint
+        // Build YAML config for hev-socks5-tunnel
+        // The tunnel connects iOS TUN to Xray's SOCKS5 proxy at 127.0.0.1:10808
+        let hevConfig = buildHevSocks5TunnelConfig()
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             
-            // Initialize hev-socks5-tunnel with Xray SOCKS endpoint
-            let result = HevSocks5TunnelInit(self.xraySocksHost, UInt16(self.xraySocksPort))
-            if result != 0 {
-                os_log("hev-socks5-tunnel init failed: %{public}d", log: logger, type: .error, result)
-                completion(NSError(domain: "HevSocks5TunnelError", code: Int(result), userInfo: [NSLocalizedDescriptionKey: "HevSocks5TunnelInit failed with code \(result)"]))
-                return
-            }
+            // Get the tunnel file descriptor from NEPacketTunnelFlow
+            // The packetFlow provides the tun_fd via the socket property
+            let tunFd = self.packetFlow.socket.fileDescriptor
             
-            os_log("hev-socks5-tunnel initialized", log: logger, type: .info)
+            os_log("Starting hev-socks5-tunnel with tun_fd=%{public}d", log: logger, type: .info, tunFd)
             
-            // Set packet callback - hev-socks5-tunnel will call this when it receives packets from Xray
-            HevSocks5TunnelSetPacketCallback { data, len in
-                // Packets FROM Xray TO network
-                let packet = Data(bytes: data, count: Int(len))
-                self?.packetFlow.writePackets([packet], withProtocols: [NSNumber(value: AF_INET)]) { error in
-                    if let error = error {
-                        os_log("Write packet error: %{public}@", log: logger, type: .error, error.localizedDescription)
-                    }
+            // Build YAML config string for hev-socks5-tunnel
+            // Config structure per upstream: tunnel + socks5 sections
+            let configYAML = self.buildHevSocks5TunnelConfigYAML()
+            
+            // Run hev-socks5-tunnel on a background thread
+            // It will read from TUN (tunFd) and forward to Xray SOCKS5
+            self.hevSocks5TunnelThread = Thread {
+                let configData = configYAML.data(using: .utf8)!
+                let configBytes = [UInt8](configData)
+                
+                let result = hev_socks5_tunnel_main_from_str(configBytes, UInt32(configBytes.count), Int32(tunFd))
+                
+                if result != 0 {
+                    os_log("hev-socks5-tunnel exited with code: %{public}d", log: logger, type: .error, result)
+                } else {
+                    os_log("hev-socks5-tunnel exited cleanly", log: logger, type: .info)
                 }
             }
             
-            // Start reading packets from iOS TUN and forwarding to hev-socks5-tunnel
-            self.readPacketsFromTunnel()
+            self.hevSocks5TunnelThread?.start()
             
+            // Give it a moment to start
+            Thread.sleep(forTimeInterval: 0.5)
+            
+            os_log("hev-socks5-tunnel bridge started", log: logger, type: .info)
             completion(nil)
         }
     }
     
-    private func readPacketsFromTunnel() {
-        guard isRunning else { return }
+    private func buildHevSocks5TunnelConfigYAML() -> String {
+        // Build YAML config per hev-socks5-tunnel upstream format
+        // tunnel: { tun_fd: <fd> } is handled by passing tun_fd directly to main_from_str
+        // socks5: { address: "127.0.0.1", port: 10808 }
+        return """
+        socks5:
+          address: "\(xraySocksHost)"
+          port: \(xraySocksPort)
+        """
+    }
+    
+    private func stopVPNStack() {
+        // Stop hev-socks5-tunnel
+        hev_socks5_tunnel_quit()
         
-        let packetFlow = self.packetFlow
-        packetFlow.readPackets { [weak self] packets, protocols in
-            guard let self = self, self.isRunning else { return }
-            
-            for packet in packets {
-                // Forward packet to hev-socks5-tunnel (which forwards to Xray SOCKS)
-                packet.withUnsafeBytes { bytes in
-                    if let baseAddress = bytes.baseAddress {
-                        let result = HevSocks5TunnelWritePacket(baseAddress.assumingMemoryBound(to: UInt8.self), packet.count)
-                        if result < 0 {
-                            os_log("hev-socks5-tunnel write failed: %{public}d", log: logger, type: .error, result)
-                        }
-                    }
-                }
-            }
-            
-            // Continue reading
-            self.readPacketsFromTunnel()
-        }
+        // Wait for thread to finish
+        hevSocks5TunnelThread?.cancel()
+        hevSocks5TunnelThread = nil
+        
+        // Stop Xray
+        XrayStop()
     }
     
     // MARK: - OpenVPN / SSH (Stubs - to be implemented with proper libraries)
@@ -449,16 +457,24 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         completion(NSError(domain: "NotImplemented", code: 0, userInfo: [NSLocalizedDescriptionKey: "SSH not yet implemented - integrate NMSSH or libssh2"]))
     }
     
-    private func stopVPNStack() {
-        HevSocks5TunnelCleanup()
-        XrayStop()
-    }
-    
     // MARK: - Stats
     private func getCurrentStats() -> [String: Any] {
-        var sent: Int64 = 0
-        var received: Int64 = 0
-        XrayGetStats(&sent, &received)
+        var sent: UInt64 = 0
+        var received: UInt64 = 0
+        
+        // Get stats from Xray
+        var xraySent: Int64 = 0
+        var xrayReceived: Int64 = 0
+        XrayGetStats(&xraySent, &xrayReceived)
+        sent += UInt64(xraySent)
+        received += UInt64(xrayReceived)
+        
+        // Get stats from hev-socks5-tunnel
+        var tunnelRx: UInt64 = 0
+        var tunnelTx: UInt64 = 0
+        let _ = hev_socks5_tunnel_stats(&tunnelRx, &tunnelTx)
+        sent += tunnelTx
+        received += tunnelRx
         
         return [
             "bytesSent": sent,
@@ -495,15 +511,17 @@ func XrayUpdateConfig(_ config_base64: UnsafePointer<CChar>) -> Int32
 @_silgen_name("XrayGetStats")
 func XrayGetStats(_ sent: UnsafeMutablePointer<Int64>, _ received: UnsafeMutablePointer<Int64>) -> Int32
 
-// hev-socks5-tunnel C API (from libhev-socks5-tunnel.a)
-@_silgen_name("HevSocks5TunnelInit")
-func HevSocks5TunnelInit(_ socks_host: UnsafePointer<CChar>, _ socks_port: UInt16) -> Int32
+// hev-socks5-tunnel C API (from HevSocks5Tunnel.xcframework)
+// Upstream API from src/hev-socks5-tunnel.h:
+//   int hev_socks5_tunnel_main(const char *config_path, int tun_fd);
+//   int hev_socks5_tunnel_main_from_str(const unsigned char *config_str, unsigned int config_len, int tun_fd);
+//   void hev_socks5_tunnel_quit(void);
+//   int hev_socks5_tunnel_stats(unsigned long long *rx_bytes, unsigned long long *tx_bytes);
+@_silgen_name("hev_socks5_tunnel_main_from_str")
+func hev_socks5_tunnel_main_from_str(_ config_str: UnsafePointer<UInt8>, _ config_len: UInt32, _ tun_fd: Int32) -> Int32
 
-@_silgen_name("HevSocks5TunnelCleanup")
-func HevSocks5TunnelCleanup()
+@_silgen_name("hev_socks5_tunnel_quit")
+func hev_socks5_tunnel_quit()
 
-@_silgen_name("HevSocks5TunnelWritePacket")
-func HevSocks5TunnelWritePacket(_ data: UnsafePointer<UInt8>, _ len: Int) -> Int32
-
-@_silgen_name("HevSocks5TunnelSetPacketCallback")
-func HevSocks5TunnelSetPacketCallback(_ callback: @convention(c) (UnsafePointer<UInt8>, Int) -> Void)
+@_silgen_name("hev_socks5_tunnel_stats")
+func hev_socks5_tunnel_stats(_ rx_bytes: UnsafeMutablePointer<UInt64>, _ tx_bytes: UnsafeMutablePointer<UInt64>) -> Int32

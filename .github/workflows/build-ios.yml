@@ -36,8 +36,6 @@ env:
   APP_GROUP: 'group.com.hamo.hamo_tunnel.shared'
   LIBXRAY_VERSION: 'v26.10.31'
   LIBXRAY_URL: 'https://github.com/XTLS/Xray-core/releases/download/v26.10.31/libxray-apple-cgo.zip'
-  HEV_SOCKS5_TUNNEL_VERSION: 'main'
-  HEV_SOCKS5_TUNNEL_URL: 'https://github.com/heiher/hev-socks5-tunnel/archive/refs/heads/main.zip'
   OUTPUT_DIR: 'build/ios/ipa'
 
 jobs:
@@ -105,12 +103,14 @@ jobs:
         run: |
           cd ios/Frameworks
           echo "Downloading hev-socks5-tunnel..."
-          git clone --recursive https://github.com/heiher/hev-socks5-tunnel.git
+          git clone --recursive https://github.com/heiher/hev-socks5-tunnel
           cd hev-socks5-tunnel
-          make static
-          cp lib/libhev-socks5-tunnel.a ../
-          cp src/hev-socks5-tunnel.h ../
-          ls -la ../libhev-socks5-tunnel.a
+          ./build-apple.sh
+          # build-apple.sh produces HevSocks5Tunnel.xcframework in build/
+          XCF=$(find . -name "HevSocks5Tunnel.xcframework" -type d | head -1)
+          test -n "$XCF"
+          cp -R "$XCF" ../
+          ls -R ../HevSocks5Tunnel.xcframework | head -50
 
       - name: Verify dependencies
 
@@ -119,9 +119,9 @@ jobs:
           echo "=== libxray ==="
           file libxray-apple-cgo.xcframework/ios-arm64/libxray.a
           echo "=== hev-socks5-tunnel ==="
-          file libhev-socks5-tunnel.a
-          echo "=== Headers ==="
-          ls -la hev-socks5-tunnel.h
+          ls -la HevSocks5Tunnel.xcframework
+          find HevSocks5Tunnel.xcframework -type f -name "*.h" | head -10
+          find HevSocks5Tunnel.xcframework -type f -name "*.a" | head -5
 
       - name: Upload dependencies artifact
         uses: actions/upload-artifact@v4
@@ -129,8 +129,7 @@ jobs:
           name: native-dependencies
           path: |
             ios/Frameworks/libxray-apple-cgo.xcframework
-            ios/Frameworks/libhev-socks5-tunnel.a
-            ios/Frameworks/hev-socks5-tunnel.h
+            ios/Frameworks/HevSocks5Tunnel.xcframework
           retention-days: 7
 
   setup_extension:

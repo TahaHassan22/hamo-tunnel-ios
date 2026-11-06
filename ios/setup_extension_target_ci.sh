@@ -2,7 +2,7 @@
 # setup_extension_target_ci.sh
 # Automated CI version - runs in GitHub Actions macOS runner
 # Adds Network Extension target and configures it for unsigned TrollStore build
-# Links libxray-apple-cgo.xcframework and hev-socks5-tunnel static library
+# Links libxray-apple-cgo.xcframework and HevSocks5Tunnel.xcframework
 
 set -e
 
@@ -55,7 +55,6 @@ ext_target.build_configurations.each do |config|
   config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'XRAY_STATIC_LIB'
   config.build_settings['OTHER_LDFLAGS'] ||= ['$(inherited)']
   config.build_settings['OTHER_LDFLAGS'] << '-framework NetworkExtension'
-  config.build_settings['OTHER_LDFLAGS'] << '-lhev-socks5-tunnel'
   config.build_settings['FRAMEWORK_SEARCH_PATHS'] ||= ['$(inherited)']
   config.build_settings['FRAMEWORK_SEARCH_PATHS'] << '$(PROJECT_DIR)/../Frameworks'
   config.build_settings['LIBRARY_SEARCH_PATHS'] ||= ['$(inherited)']
@@ -134,14 +133,14 @@ else
   puts "WARNING: libxray-apple-cgo.xcframework not found"
 end
 
-# Add hev-socks5-tunnel static library
-hev_lib_path = File.join(ext_path, '..', 'Frameworks', 'libhev-socks5-tunnel.a')
-if File.exist?(hev_lib_path)
-  hev_lib_ref = project.frameworks_group.new_file(hev_lib_path)
-  ext_target.frameworks_build_phase.add_file_reference(hev_lib_ref)
-  puts "Linked libhev-socks5-tunnel.a"
+# Add HevSocks5Tunnel.xcframework
+hev_xcframework_path = File.join(ext_path, '..', 'Frameworks', 'HevSocks5Tunnel.xcframework')
+if File.exist?(hev_xcframework_path)
+  hev_xcframework_ref = project.frameworks_group.new_file(hev_xcframework_path)
+  ext_target.frameworks_build_phase.add_file_reference(hev_xcframework_ref)
+  puts "Linked HevSocks5Tunnel.xcframework"
 else
-  puts "WARNING: libhev-socks5-tunnel.a not found"
+  puts "WARNING: HevSocks5Tunnel.xcframework not found"
 end
 
 # Set the extension's principal class
@@ -192,7 +191,6 @@ ext_target.build_configurations.each do |config|
   config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'XRAY_STATIC_LIB'
   config.build_settings['OTHER_LDFLAGS'] ||= ['$(inherited)']
   config.build_settings['OTHER_LDFLAGS'] << '-framework NetworkExtension'
-  config.build_settings['OTHER_LDFLAGS'] << '-lhev-socks5-tunnel'
   config.build_settings['FRAMEWORK_SEARCH_PATHS'] ||= ['$(inherited)']
   config.build_settings['FRAMEWORK_SEARCH_PATHS'] << '$(PROJECT_DIR)/../Frameworks'
   config.build_settings['LIBRARY_SEARCH_PATHS'] ||= ['$(inherited)']
@@ -271,14 +269,14 @@ else
   puts "WARNING: libxray-apple-cgo.xcframework not found"
 end
 
-# Add hev-socks5-tunnel static library
-hev_lib_path = File.join(ext_path, '..', 'Frameworks', 'libhev-socks5-tunnel.a')
-if File.exist?(hev_lib_path)
-  hev_lib_ref = project.frameworks_group.new_file(hev_lib_path)
-  ext_target.frameworks_build_phase.add_file_reference(hev_lib_ref)
-  puts "Linked libhev-socks5-tunnel.a"
+# Add HevSocks5Tunnel.xcframework
+hev_xcframework_path = File.join(ext_path, '..', 'Frameworks', 'HevSocks5Tunnel.xcframework')
+if File.exist?(hev_xcframework_path)
+  hev_xcframework_ref = project.frameworks_group.new_file(hev_xcframework_path)
+  ext_target.frameworks_build_phase.add_file_reference(hev_xcframework_ref)
+  puts "Linked HevSocks5Tunnel.xcframework"
 else
-  puts "WARNING: libhev-socks5-tunnel.a not found"
+  puts "WARNING: HevSocks5Tunnel.xcframework not found"
 end
 
 # Set the extension's principal class
