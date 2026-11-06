@@ -267,10 +267,10 @@ xcodebuild \
 
 ```
 ios/Frameworks/
-├── libxray-apple-cgo.xcframework/     # Xray core
+├── LibXray.xcframework/               # Xray core (release asset libxray-apple-cgo.zip)
 ├── libhev-socks5-tunnel.a              # TUN2SOCKS bridge
 ├── hev-socks5-tunnel.h                 # TUN2SOCKS header
-├── libxray-apple-cgo.xcframework/ios-arm64/libxray.a
+├── LibXray.xcframework/ios-arm64/libXray.a
 ├── OpenVPNAdapter.framework/           # OpenVPN adapter
 ├── NMSSH.framework/                    # SSH wrapper
 └── libssh2.a                           # Raw SSH2 (for dynamic forwarding)
@@ -324,7 +324,7 @@ xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Relea
 1. **OpenVPNAdapter** requires iOS 12.0+, we target 15.0 ✓
 2. **NMSSH** requires libssh2 - ensure it's linked
 3. **hev-socks5-tunnel** is pure C, no dependencies
-4. **libxray-apple-cgo** is Go-compiled, CGO enabled
+4. **LibXray** is Go-compiled, CGO enabled
 5. All frameworks must be built for `arm64` (iOS device)
 6. Simulator builds (`arm64_x86_64`) need separate builds for testing
 7. App Group `group.com.hamo.hamo_tunnel.shared` enables keychain sharing between app and extension

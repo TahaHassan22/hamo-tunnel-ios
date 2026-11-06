@@ -1,13 +1,13 @@
-# libxray-apple-cgo Integration Guide
+# LibXray Integration Guide
 
 ## Overview
-The `libxray-apple-cgo.xcframework` is a prebuilt Xray core compiled with cgo for iOS.
+The `LibXray.xcframework` (release asset `libxray-apple-cgo.zip`) is a prebuilt Xray core compiled with cgo for iOS.
 It provides the C API that our Network Extension uses via the bridging header.
 
 ## Download
-1. Go to: https://github.com/XTLS/Xray-core/releases
+1. Go to: https://github.com/XTLS/libXray/releases
 2. Download `libxray-apple-cgo.zip` (version v26.10.31 or later)
-3. Extract to get `libxray-apple-cgo.xcframework`
+3. Extract to get `libxray-apple-cgo/LibXray.xcframework`
 
 ## Integration Steps
 
@@ -17,7 +17,7 @@ It provides the C API that our Network Extension uses via the bridging header.
 # 1. Select Runner project (not target)
 # 2. Go to "Frameworks, Libraries, and Embedded Content"
 # 3. Click "+" -> "Add Other..." -> "Add Files..."
-# 4. Select libxray-apple-cgo.xcframework
+# 4. Select LibXray.xcframework
 # 5. Make sure "Embed & Sign" is selected
 # 6. Add to BOTH targets: Runner AND HamoTunnelExtension
 ```
@@ -72,7 +72,7 @@ Target: HamoTunnelExtension
 - Enable Bitcode: NO
 - Bridging Header: HamoTunnelExtension/HamoTunnelExtension-Bridging-Header.h
 - Code Sign Entitlements: HamoTunnelExtension/HamoTunnelExtension.entitlements
-- Frameworks: NetworkExtension.framework, libxray-apple-cgo.xcframework
+- Frameworks: NetworkExtension.framework, LibXray.xcframework
 ```
 
 ### 6. App Group Configuration

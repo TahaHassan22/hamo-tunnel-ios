@@ -2,7 +2,7 @@
 # setup_extension_target_ci.sh
 # Automated CI version - runs in GitHub Actions macOS runner
 # Adds Network Extension target and configures it for unsigned TrollStore build
-# Links libxray-apple-cgo.xcframework and HevSocks5Tunnel.xcframework
+# Links LibXray.xcframework and HevSocks5Tunnel.xcframework
 
 set -e
 
@@ -61,10 +61,10 @@ puts "Creating HamoTunnelExtension target..."
 
 # Create the extension target
 ext_target = project.new_target(:app_extension, 'HamoTunnelExtension', :ios, '15.0')
-ext_target.product_bundle_identifier = 'com.hamo.hamo_tunnel.HamoTunnelExtension'
 
 # Set build settings - NO CODE SIGNING
 ext_target.build_configurations.each do |config|
+  config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.hamo.hamo_tunnel.HamoTunnelExtension'
   config.build_settings['SWIFT_VERSION'] = '5.0'
   config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
   config.build_settings['CODE_SIGN_STYLE'] = 'Manual'
@@ -80,12 +80,13 @@ ext_target.build_configurations.each do |config|
   config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'XRAY_STATIC_LIB'
   config.build_settings['OTHER_LDFLAGS'] ||= ['$(inherited)']
   config.build_settings['OTHER_LDFLAGS'] << '-framework NetworkExtension'
+  # PROJECT_DIR is the directory containing Runner.xcodeproj, i.e. ios/
   config.build_settings['FRAMEWORK_SEARCH_PATHS'] ||= ['$(inherited)']
-  config.build_settings['FRAMEWORK_SEARCH_PATHS'] << '$(PROJECT_DIR)/../Frameworks'
+  config.build_settings['FRAMEWORK_SEARCH_PATHS'] << '$(PROJECT_DIR)/Frameworks'
   config.build_settings['LIBRARY_SEARCH_PATHS'] ||= ['$(inherited)']
-  config.build_settings['LIBRARY_SEARCH_PATHS'] << '$(PROJECT_DIR)/../Frameworks'
+  config.build_settings['LIBRARY_SEARCH_PATHS'] << '$(PROJECT_DIR)/Frameworks'
   config.build_settings['HEADER_SEARCH_PATHS'] ||= ['$(inherited)']
-  config.build_settings['HEADER_SEARCH_PATHS'] << '$(PROJECT_DIR)/../Frameworks'
+  config.build_settings['HEADER_SEARCH_PATHS'] << '$(PROJECT_DIR)/Frameworks'
 end
 
 # Create or get the extension group
@@ -144,18 +145,21 @@ frameworks = [
 ]
 
 frameworks.each do |fw|
-  framework_ref = project.frameworks_group.new_file("System/Library/Frameworks/#{fw}.framework")
+  # System frameworks must be referenced with the SDKROOT source tree,
+  # otherwise the path resolves relative to ios/ and the link fails.
+  framework_ref = project.frameworks_group.new_file("System/Library/Frameworks/#{fw}.framework", :sdk_root)
   ext_target.frameworks_build_phase.add_file_reference(framework_ref)
 end
 
-# Add libxray-apple-cgo.xcframework
-xcframework_path = File.join(ext_path, '..', 'Frameworks', 'libxray-apple-cgo.xcframework')
-if File.exist?(xcframework_path)
-  xcframework_ref = project.frameworks_group.new_file(xcframework_path)
-  ext_target.frameworks_build_phase.add_file_reference(xcframework_ref)
-  puts "Linked libxray-apple-cgo.xcframework"
+# Add LibXray.xcframework (Xray core; release asset libxray-apple-cgo.zip
+# extracts to libxray-apple-cgo/LibXray.xcframework)
+libxray_xcframework_path = File.join(ext_path, '..', 'Frameworks', 'LibXray.xcframework')
+if File.exist?(libxray_xcframework_path)
+  libxray_xcframework_ref = project.frameworks_group.new_file(libxray_xcframework_path)
+  ext_target.frameworks_build_phase.add_file_reference(libxray_xcframework_ref)
+  puts "Linked LibXray.xcframework"
 else
-  puts "WARNING: libxray-apple-cgo.xcframework not found"
+  puts "WARNING: LibXray.xcframework not found"
 end
 
 # Add HevSocks5Tunnel.xcframework
@@ -167,6 +171,29 @@ if File.exist?(hev_xcframework_path)
 else
   puts "WARNING: HevSocks5Tunnel.xcframework not found"
 end
+
+# ---------------------------------------------------------------------------
+# Wire the extension into the Runner app target so it is built and embedded
+# ---------------------------------------------------------------------------
+runner_target = project.targets.find { |t| t.name == 'Runner' }
+unless runner_target
+  raise "Runner target not found in #{project_path}. " \
+        "Available targets: #{project.targets.map(&:name).join(', ')}"
+end
+
+# Build HamoTunnelExtension before Runner
+runner_target.add_dependency(ext_target)
+
+# Copy HamoTunnelExtension.appex into Runner.app/PlugIns/ (dst_subfolder_spec 13)
+embed_phase = project.new(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase)
+embed_phase.name = 'Embed App Extensions'
+embed_phase.dst_path = ''
+embed_phase.symbol_dst_subfolder_spec = :plug_ins
+runner_target.build_phases << embed_phase
+
+embed_build_file = embed_phase.add_file_reference(ext_target.product_reference)
+embed_build_file.settings = { 'ATTRIBUTES' => %w(CodeSignOnCopy RemoveHeadersOnCopy) }
+puts "Embedded HamoTunnelExtension.appex in Runner (target dependency + copy phase)"
 
 # Set the extension's principal class
 ext_target.build_configurations.each do |config|
