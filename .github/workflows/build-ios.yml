@@ -401,7 +401,8 @@ jobs:
       - name: Install ldid
         run: |
           brew install ldid || true
-          ldid -v
+          command -v ldid
+          ls -la "$(command -v ldid)"
 
       - name: Extract .ipa for signing
         run: |
